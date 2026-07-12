@@ -62,6 +62,7 @@ export interface AdminMetrics {
     monthlyLimit:          number;
     usagePct:              number;
     remainingCalls:        number;
+    periodStart:           string;
     nextResetDate:         string;
     daysUntilReset:        number;
     billingAnchorDay:      number;

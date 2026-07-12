@@ -156,6 +156,46 @@ export const fetchAnalyticsErrors = (range: DateRange) =>
 export const fetchAnalyticsPowerUsers = (range: DateRange) =>
   fetchAnalytics<PowerUserRow[]>('power_users', range);
 
+// ── Top users (Users tab) ───────────────────────────────────────────────────
+
+export interface TopUserRow {
+  user_id:        string;
+  email:          string | null;
+  plan:           string | null;
+  plan_status:    string | null;
+  signup_at:      string | null;
+  first_seen:     string | null;
+  last_seen:      string;
+  last_login:     string | null;
+  last_search_at: string | null;
+  total_searches: number;
+  total_sessions: number;
+  reports_viewed: number;
+  saved_reports:  number;
+  watchlist_adds: number;
+  portfolio_adds: number;
+  rent_reviews:   number;
+  utm_source:     string | null;
+  utm_medium:     string | null;
+  utm_campaign:   string | null;
+  search_spark:   number[];   // 30 daily search counts, oldest → newest
+}
+
+export const fetchTopUsers = () =>
+  fetchAnalytics<TopUserRow[]>('top_users', 'all');
+
+// ── RentCast usage time series ──────────────────────────────────────────────
+
+export type RentcastBucket = 'day' | 'week' | 'month';
+export interface RentcastSeriesPoint {
+  bucket: string;   // ISO timestamp of the bucket start
+  calls:  number;
+}
+
+// range is unused by this action (the bucket drives the lookback window server-side).
+export const fetchRentcastSeries = (bucket: RentcastBucket) =>
+  fetchAnalytics<RentcastSeriesPoint[]>('rentcast_series', 'all', { bucket });
+
 // ── Feature name map ──────────────────────────────────────────────────────────
 // Groups raw event names into human-readable feature rows for the UI.
 

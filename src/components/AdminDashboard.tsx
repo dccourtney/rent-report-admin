@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, Fragment } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   RefreshCw, TrendingUp, Users, DollarSign, ShieldAlert, Search,
@@ -11,12 +11,14 @@ import { fetchAdminMetrics, updateRentcastLimit, updateRentcastSetting, AdminMet
 import {
   fetchAnalyticsOverview, fetchAnalyticsRetention, fetchAnalyticsFunnel,
   fetchAnalyticsFeatures, fetchAnalyticsJourneys, fetchJourneyDetail,
-  fetchAnalyticsErrors, fetchAnalyticsPowerUsers, fetchModalFunnel,
+  fetchAnalyticsErrors, fetchTopUsers, fetchModalFunnel,
+  fetchRentcastSeries,
   groupFeatures,
   FUNNEL_STEP_LABELS,
   DateRange,
   AnalyticsOverview, RetentionData, FunnelStep, GroupedFeature,
-  JourneyRow, JourneyEvent, ErrorRow, DropoffData, PowerUserRow, ModalFunnelData,
+  JourneyRow, JourneyEvent, ErrorRow, DropoffData, TopUserRow, ModalFunnelData,
+  RentcastBucket, RentcastSeriesPoint,
 } from '../lib/adminAnalyticsApi';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -109,9 +111,9 @@ function Th({ children }: { children?: React.ReactNode }) {
   return <th className="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide bg-slate-50">{children}</th>;
 }
 
-function Td({ children, mono, muted }: { children: React.ReactNode; mono?: boolean; muted?: boolean }) {
+function Td({ children, mono, muted, right }: { children: React.ReactNode; mono?: boolean; muted?: boolean; right?: boolean }) {
   return (
-    <td className={`px-4 py-2.5 text-sm border-t border-slate-100 ${mono ? 'font-mono text-xs' : ''} ${muted ? 'text-slate-400' : 'text-slate-700'}`}>
+    <td className={`px-4 py-2.5 text-sm border-t border-slate-100 ${mono ? 'font-mono text-xs' : ''} ${muted ? 'text-slate-400' : 'text-slate-700'} ${right ? 'text-right' : ''}`}>
       {children}
     </td>
   );
@@ -652,76 +654,223 @@ function ErrorsTab({
   );
 }
 
-// ── Power users tab ───────────────────────────────────────────────────────────
+// ── Top users tab ─────────────────────────────────────────────────────────────
 
-const SIGNAL_LABELS: Record<string, string> = {
-  property_search_completed: 'search',
-  report_viewed:             'report',
-  pricing_viewed:            'pricing',
-  checkout_started:          'checkout',
-  free_limit_reached:        'limit hit',
-  report_downloaded:         'download',
-  rent_review_created:       'rent review',
-  portfolio_property_added:  'portfolio',
-  watchlist_added:           'watchlist',
-  purchase_completed:        'purchased',
-};
+// Inline 30-day search-activity sparkline (one bar per day, oldest → newest).
+function Sparkline({ data }: { data: number[] }) {
+  if (!data || data.length === 0 || data.every(v => v === 0)) {
+    return <span className="text-slate-300">—</span>;
+  }
+  const max = Math.max(...data, 1);
+  const w = 84, h = 22, bw = w / data.length;
+  return (
+    <svg width={w} height={h} className="block" aria-hidden="true">
+      {data.map((v, i) => {
+        const bh = Math.max(1, Math.round((v / max) * (h - 2)));
+        return (
+          <rect
+            key={i}
+            x={i * bw}
+            y={h - bh}
+            width={Math.max(1, bw - 0.6)}
+            height={bh}
+            className={v > 0 ? 'fill-teal-400' : 'fill-slate-200'}
+          />
+        );
+      })}
+    </svg>
+  );
+}
 
-function PowerUsersTab({ rows, loading }: { rows: PowerUserRow[] | null; loading: boolean }) {
+type UserSortKey = 'last_seen' | 'last_search_at' | 'total_searches' | 'saved_reports' | 'watchlist_adds' | 'portfolio_adds' | 'rent_reviews';
+
+const daysAgo = (iso: string | null) => iso ? Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000) : null;
+
+function acquisitionLabel(r: TopUserRow) {
+  const parts = [r.utm_source, r.utm_medium, r.utm_campaign].filter(Boolean);
+  return parts.length ? parts.join(' · ') : 'Direct / none';
+}
+
+function Detail({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div>
+      <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{label}</div>
+      <div className="text-slate-700 mt-0.5">{value}</div>
+    </div>
+  );
+}
+
+function TopUsersTab({ rows, loading }: { rows: TopUserRow[] | null; loading: boolean }) {
+  const [sortKey, setSortKey]   = useState<UserSortKey>('last_seen');
+  const [dir, setDir]           = useState<'asc' | 'desc'>('desc');
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
   if (loading) return <TabSpinner />;
 
+  const dateKeys: UserSortKey[] = ['last_seen', 'last_search_at'];
+  const sorted = [...(rows ?? [])].sort((a, b) => {
+    const cmp = dateKeys.includes(sortKey)
+      ? new Date((a[sortKey] as string) ?? 0).getTime() - new Date((b[sortKey] as string) ?? 0).getTime()
+      : (a[sortKey] as number) - (b[sortKey] as number);
+    return dir === 'asc' ? cmp : -cmp;
+  });
+
+  const toggle = (k: UserSortKey) => {
+    if (sortKey === k) setDir(d => (d === 'asc' ? 'desc' : 'asc'));
+    else { setSortKey(k); setDir('desc'); }
+  };
+
+  const toggleExpand = (id: string) => setExpanded(prev => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
+
+  const SortTh = ({ k, label, left }: { k: UserSortKey; label: string; left?: boolean }) => (
+    <th
+      onClick={() => toggle(k)}
+      className={`px-4 py-2.5 ${left ? 'text-left' : 'text-right'} text-xs font-semibold text-slate-500 uppercase tracking-wide bg-slate-50 cursor-pointer select-none hover:text-slate-800`}
+    >
+      <span className="inline-flex items-center gap-1">
+        {label}{sortKey === k && <span className="text-slate-400">{dir === 'asc' ? '▲' : '▼'}</span>}
+      </span>
+    </th>
+  );
+
   return (
-    <Section title="High buying-intent users">
+    <Section title={`Top users by activity (${sorted.length})`}>
       <div className="overflow-x-auto">
         <table className="w-full">
           <thead>
             <tr>
-              <Th>Visitor / User</Th>
+              <th className="bg-slate-50 w-8" />
+              <Th>User</Th>
               <Th>Plan</Th>
-              <Th>Intent score</Th>
-              <Th>Signals</Th>
-              <Th>Last seen</Th>
+              <SortTh k="last_seen"      label="Last seen"   left />
+              <SortTh k="last_search_at" label="Last search" left />
+              <SortTh k="total_searches" label="Searches" />
+              <Th>30-day searches</Th>
+              <SortTh k="saved_reports"  label="Reports" />
+              <SortTh k="watchlist_adds" label="Watchlist" />
+              <SortTh k="portfolio_adds" label="Portfolio" />
+              <SortTh k="rent_reviews"   label="Rent reviews" />
             </tr>
           </thead>
           <tbody>
-            {!rows || rows.length === 0
-              ? <EmptyRow cols={5} message="No high-intent users yet" />
-              : rows.map(r => (
-                  <tr key={r.anonymous_id} className="hover:bg-slate-50">
-                    <Td>
-                      <div className="flex flex-col gap-0.5">
-                        {r.email
-                          ? <span className="font-medium">{r.email}</span>
-                          : <span className="font-mono text-slate-500">{r.anon_short}</span>}
-                        {r.email && <span className="font-mono text-xs text-slate-400">{r.anon_short}</span>}
-                      </div>
-                    </Td>
-                    <Td>{planBadge(r.current_plan)}</Td>
-                    <Td>
-                      <span className={`text-lg font-bold ${r.intent_score >= 10 ? 'text-orange-500' : 'text-slate-700'}`}>
-                        {r.intent_score}
-                      </span>
-                    </Td>
-                    <Td>
-                      <div className="flex flex-wrap gap-1">
-                        {(r.signals ?? []).map(s => (
-                          <span key={s} className={`px-1.5 py-0.5 rounded text-xs font-medium ${
-                            s === 'purchase_completed' ? 'bg-teal-100 text-teal-700' :
-                            s === 'checkout_started'  ? 'bg-orange-100 text-orange-700' :
-                            'bg-slate-100 text-slate-600'
-                          }`}>
-                            {SIGNAL_LABELS[s] ?? s}
-                          </span>
-                        ))}
-                      </div>
-                    </Td>
-                    <Td muted>{fmtRelative(r.last_seen)}</Td>
-                  </tr>
-                ))}
+            {sorted.length === 0
+              ? <EmptyRow cols={11} message="No users yet" />
+              : sorted.map(r => {
+                  const open = expanded.has(r.user_id);
+                  const inactive = daysAgo(r.last_seen);
+                  const age = daysAgo(r.signup_at);
+                  return (
+                    <Fragment key={r.user_id}>
+                      <tr className="hover:bg-slate-50 cursor-pointer" onClick={() => toggleExpand(r.user_id)}>
+                        <Td>
+                          {open ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-300" />}
+                        </Td>
+                        <Td>
+                          <div className="flex flex-col gap-0.5">
+                            <span className="font-medium">{r.email ?? '—'}</span>
+                            <span className="font-mono text-xs text-slate-400">…{r.user_id.slice(-8)}</span>
+                          </div>
+                        </Td>
+                        <Td>
+                          <div className="flex flex-col gap-0.5 items-start">
+                            {planBadge(r.plan)}
+                            {r.plan_status && r.plan_status !== 'active' && (
+                              <span className={`text-[10px] font-medium ${r.plan_status === 'past_due' ? 'text-red-500' : 'text-slate-400'}`}>
+                                {r.plan_status.replace('_', ' ')}
+                              </span>
+                            )}
+                          </div>
+                        </Td>
+                        <Td muted>{fmtRelative(r.last_seen)}</Td>
+                        <Td muted>{r.last_search_at ? fmtRelative(r.last_search_at) : '—'}</Td>
+                        <Td right><span className="font-semibold text-slate-800">{r.total_searches.toLocaleString()}</span></Td>
+                        <Td><Sparkline data={r.search_spark} /></Td>
+                        <Td right>{r.saved_reports.toLocaleString()}</Td>
+                        <Td right>{r.watchlist_adds.toLocaleString()}</Td>
+                        <Td right>{r.portfolio_adds.toLocaleString()}</Td>
+                        <Td right>{r.rent_reviews.toLocaleString()}</Td>
+                      </tr>
+                      {open && (
+                        <tr className="bg-slate-50/70">
+                          <td colSpan={11} className="px-6 py-4 border-t border-slate-100">
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-3 text-xs">
+                              <Detail label="Signed up" value={r.signup_at ? `${fmtDate(r.signup_at)}${age != null ? ` · ${age}d ago` : ''}` : '—'} />
+                              <Detail label="Last login" value={fmtRelative(r.last_login)} />
+                              <Detail label="First seen" value={r.first_seen ? fmtDate(r.first_seen) : '—'} />
+                              <Detail label="Days inactive" value={inactive != null ? `${inactive}d` : '—'} />
+                              <Detail label="Total sessions" value={r.total_sessions.toLocaleString()} />
+                              <Detail label="Reports viewed" value={r.reports_viewed.toLocaleString()} />
+                              <Detail label="Plan status" value={r.plan_status ?? '—'} />
+                              <Detail label="Acquisition" value={acquisitionLabel(r)} />
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
           </tbody>
         </table>
       </div>
+      <p className="text-xs text-slate-400 px-4 py-3 border-t border-slate-100">
+        Top 100 signed-up users by recent activity — click a row for signup, acquisition, and session detail.
+        Watchlist/Portfolio show "add" events over time (portfolio is stored client-side, so this is activity, not a live item count).
+      </p>
     </Section>
+  );
+}
+
+// ── RentCast usage chart ────────────────────────────────────────────────────
+
+function RentcastChart({ series, bucket }: { series: RentcastSeriesPoint[] | null; bucket: RentcastBucket }) {
+  if (series === null) {
+    return <div className="h-32 flex items-center justify-center text-sm text-slate-400">Loading…</div>;
+  }
+  if (series.length === 0) {
+    return <div className="h-32 flex items-center justify-center text-sm text-slate-400">No RentCast requests recorded yet.</div>;
+  }
+
+  const max   = Math.max(...series.map(p => p.calls), 1);
+  const total = series.reduce((s, p) => s + p.calls, 0);
+  const label = (iso: string) => {
+    const d = new Date(iso);
+    return bucket === 'month'
+      ? d.toLocaleDateString('en-US', { month: 'short' })
+      : d.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' });
+  };
+  const step = Math.max(1, Math.ceil(series.length / 12));
+
+  return (
+    <div>
+      <div className="flex items-end gap-1 h-32">
+        {series.map((p, i) => (
+          <div
+            key={i}
+            className="flex-1 h-full flex flex-col justify-end min-w-0"
+            title={`${label(p.bucket)}: ${p.calls.toLocaleString()} requests`}
+          >
+            <div
+              className="w-full bg-teal-400 hover:bg-teal-500 rounded-t transition-colors"
+              style={{ height: `${Math.max(2, Math.round((p.calls / max) * 100))}%` }}
+            />
+          </div>
+        ))}
+      </div>
+      <div className="flex gap-1 mt-1">
+        {series.map((p, i) => (
+          <div key={i} className="flex-1 text-center text-[9px] text-slate-400 truncate min-w-0">
+            {i % step === 0 ? label(p.bucket) : ''}
+          </div>
+        ))}
+      </div>
+      <p className="text-xs text-slate-400 mt-2">
+        {total.toLocaleString()} requests over the last {series.length} {bucket}{series.length !== 1 ? 's' : ''}
+      </p>
+    </div>
   );
 }
 
@@ -746,6 +895,10 @@ export default function AdminDashboard() {
   const [anchorSaved,  setAnchorSaved]  = useState(false);
   const [anchorError,  setAnchorError]  = useState<string | null>(null);
 
+  // RentCast usage time series
+  const [rentcastBucket, setRentcastBucket] = useState<RentcastBucket>('day');
+  const [rentcastSeries, setRentcastSeries] = useState<RentcastSeriesPoint[] | null>(null);
+
   // ── Analytics tab state ───────────────────────────────────────────────────
   const [activeTab,   setActiveTab]   = useState<AdminTab>('overview');
   const [dateRange,   setDateRange]   = useState<DateRange>('7d');
@@ -759,7 +912,7 @@ export default function AdminDashboard() {
   const [journeyRows,        setJourneyRows]      = useState<JourneyRow[] | null>(null);
   const [errorRows,          setErrorRows]        = useState<ErrorRow[] | null>(null);
   const [dropoffs,           setDropoffs]         = useState<DropoffData | null>(null);
-  const [powerUsers,         setPowerUsers]       = useState<PowerUserRow[] | null>(null);
+  const [topUsers,          setTopUsers]        = useState<TopUserRow[] | null>(null);
 
   // Track which (tab, range) combos have been loaded to avoid redundant fetches
   const loadedRef = useRef<Set<string>>(new Set());
@@ -849,8 +1002,8 @@ export default function AdminDashboard() {
           setDropoffs(res.data.dropoffs);
         }
       } else if (tab === 'users') {
-        const res = await fetchAnalyticsPowerUsers(range);
-        if (res.status === 'ok') setPowerUsers(res.data);
+        const res = await fetchTopUsers();
+        if (res.status === 'ok') setTopUsers(res.data);
       }
     } finally {
       setTabLoading(false);
@@ -873,7 +1026,7 @@ export default function AdminDashboard() {
     setJourneyRows(null);
     setErrorRows(null);
     setDropoffs(null);
-    setPowerUsers(null);
+    setTopUsers(null);
     setDateRange(range);
     loadAnalyticsTab(activeTab, range);
   };
@@ -888,7 +1041,7 @@ export default function AdminDashboard() {
     setJourneyRows(null);
     setErrorRows(null);
     setDropoffs(null);
-    setPowerUsers(null);
+    setTopUsers(null);
     loadMetrics();
     if (activeTab !== 'overview') {
       loadAnalyticsTab(activeTab, dateRange);
@@ -907,6 +1060,17 @@ export default function AdminDashboard() {
     loadMetrics();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated, profile]);
+
+  // Load the RentCast usage series once metrics are available, and on bucket change.
+  useEffect(() => {
+    if (phase !== 'ok') return;
+    let cancelled = false;
+    setRentcastSeries(null);
+    fetchRentcastSeries(rentcastBucket).then(res => {
+      if (!cancelled && res.status === 'ok') setRentcastSeries(res.data);
+    });
+    return () => { cancelled = true; };
+  }, [phase, rentcastBucket]);
 
   if (phase === 'forbidden') return <Forbidden />;
   if (phase === 'error') return (
@@ -990,80 +1154,66 @@ export default function AdminDashboard() {
             {/* RentCast usage */}
             {(() => {
               const u = metrics.rentcastUsage;
-              const pl = metrics.rentcastPlan;
               const pct = u?.usagePct ?? 0;
               const isOver = pct >= 100;
               const barColor   = isOver ? 'bg-red-500' : pct >= 90 ? 'bg-red-400' : pct >= 80 ? 'bg-amber-400' : 'bg-teal-500';
               const labelColor = isOver ? 'text-red-600' : pct >= 80 ? 'text-amber-600' : 'text-slate-700';
+              const dayFmt = (iso?: string) => iso ? new Date(iso + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—';
+              const resetsIn = u?.daysUntilReset === 0 ? 'today' : u?.daysUntilReset === 1 ? 'tomorrow' : `in ${u?.daysUntilReset} days`;
               return (
-                <Section title="RentCast API — this month">
-                  <div className="p-5 space-y-4">
+                <Section title="RentCast API usage">
+                  <div className="p-5 space-y-5">
 
-                    {/* Plan badge + cost summary */}
-                    <div className="flex flex-wrap items-start justify-between gap-4 pb-4 border-b border-slate-100">
-                      <div className="space-y-0.5">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-semibold text-slate-900">API {pl?.name ?? 'Foundation'} plan</span>
-                          <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-teal-100 text-teal-700">Active</span>
-                        </div>
-                        <p className="text-xs text-slate-500">
-                          {fmt$(pl?.baseFee ?? 74)}/mo · {(pl?.includedCalls ?? 1000).toLocaleString()} requests included · ${pl?.overageRate ?? 0.06}/request overage
-                        </p>
-                        {/* Reset countdown */}
-                        {u?.nextResetDate && (() => {
-                          const d = u.daysUntilReset;
-                          const label = d === 0 ? 'today' : d === 1 ? 'tomorrow' : `in ${d} days`;
-                          const resetFmt = new Date(u.nextResetDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-                          return (
-                            <p className={`text-xs font-medium mt-1 ${d <= 1 ? 'text-orange-600' : 'text-slate-500'}`}>
-                              Billing resets {label} · {resetFmt}
-                            </p>
-                          );
-                        })()}
-                      </div>
-                      <div className="text-right">
-                        <p className="text-xs text-slate-500 mb-0.5">Est. total this month</p>
-                        <p className={`text-2xl font-bold ${isOver ? 'text-red-600' : 'text-slate-900'}`}>
-                          {fmt$(u?.totalCostThisMonth ?? pl?.baseFee ?? 74)}
-                        </p>
-                        {isOver && (
-                          <p className="text-xs text-red-500 mt-0.5">
-                            {fmt$(pl?.baseFee ?? 74)} base + {fmt$(u?.overageCostThisMonth ?? 0)} overage ({u?.overageCallsThisMonth ?? 0} calls × ${pl?.overageRate ?? 0.06})
-                          </p>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Usage bar */}
+                    {/* Requests this period */}
                     <div>
                       <div className="flex items-baseline justify-between mb-2">
                         <span className={`text-3xl font-bold ${labelColor}`}>
                           {(u?.callsThisMonth ?? 0).toLocaleString()}
                           <span className="text-base font-normal text-slate-400 ml-1">
-                            / {(u?.includedCalls ?? 1000).toLocaleString()} included
+                            / {(u?.monthlyLimit ?? 0).toLocaleString()} limit
                           </span>
+                          <span className="text-sm font-normal text-slate-400 ml-2">requests this period</span>
                         </span>
                         <span className={`text-sm font-semibold ${labelColor}`}>{pct}%</span>
                       </div>
                       <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
                         <div className={`h-3 rounded-full transition-all ${barColor}`} style={{ width: `${Math.min(pct, 100)}%` }} />
                       </div>
-                      <div className="flex justify-between text-xs text-slate-400 mt-1">
+                      <div className="flex flex-wrap justify-between gap-x-4 text-xs text-slate-400 mt-1.5">
+                        <span>Period started {dayFmt(u?.periodStart)} · resets {dayFmt(u?.nextResetDate)} ({resetsIn})</span>
                         <span>
                           {isOver
-                            ? <span className="text-red-500 font-semibold">{(u?.overageCallsThisMonth ?? 0)} overage calls this month</span>
-                            : `${(u?.remainingCalls ?? 0).toLocaleString()} calls remaining this month`}
+                            ? <span className="text-red-500 font-semibold">{Math.max(0, (u?.callsThisMonth ?? 0) - (u?.monthlyLimit ?? 0)).toLocaleString()} over limit</span>
+                            : `${(u?.remainingCalls ?? 0).toLocaleString()} remaining · alerts at 80 / 90 / 100%`}
                         </span>
-                        <span>alert threshold: 80% · 90% · 100%</span>
                       </div>
                       {isOver && (
                         <div className="flex items-center gap-2 mt-3 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5">
                           <AlertTriangle className="w-4 h-4 text-red-500 flex-shrink-0" />
                           <p className="text-sm font-semibold text-red-700">
-                            Over included limit — overage calls billed at ${pl?.overageRate ?? 0.06}/request. Consider upgrading to the Growth plan (5,000 calls, $199/mo) to reduce overage costs.
+                            Over the alert threshold of {(u?.monthlyLimit ?? 0).toLocaleString()} requests for this period.
                           </p>
                         </div>
                       )}
+                    </div>
+
+                    {/* Requests over time */}
+                    <div className="pt-1 border-t border-slate-100">
+                      <div className="flex items-center justify-between pt-4 mb-3">
+                        <span className="text-sm font-semibold text-slate-700">Requests over time</span>
+                        <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
+                          {(['day', 'week', 'month'] as const).map(b => (
+                            <button
+                              key={b}
+                              onClick={() => setRentcastBucket(b)}
+                              className={`px-3 py-1 capitalize transition-colors ${rentcastBucket === b ? 'bg-slate-900 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
+                            >
+                              {b}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <RentcastChart series={rentcastSeries} bucket={rentcastBucket} />
                     </div>
 
                     {/* Settings row: alert threshold + billing anchor day */}
@@ -1256,7 +1406,7 @@ export default function AdminDashboard() {
 
         {/* ── Users (power users) tab ────────────────────────────────────── */}
         {activeTab === 'users' && (
-          <PowerUsersTab rows={powerUsers} loading={tabLoading} />
+          <TopUsersTab rows={topUsers} loading={tabLoading} />
         )}
 
       </div>
