@@ -2,7 +2,6 @@ import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ShieldCheck } from 'lucide-react';
 import { useAuthStore } from '../stores/authStore';
-import EmailSignIn from './EmailSignIn';
 
 export default function Login() {
   const { login, isAuthenticated, loading, error } = useAuthStore();
@@ -43,14 +42,6 @@ export default function Login() {
             </svg>
             {loading ? 'Signing in…' : 'Continue with Google'}
           </button>
-
-          <div className="flex items-center gap-3 my-5">
-            <div className="flex-1 h-px bg-slate-200" />
-            <span className="text-xs text-slate-400">or</span>
-            <div className="flex-1 h-px bg-slate-200" />
-          </div>
-
-          <EmailSignIn />
 
           <p className="text-xs text-slate-400 text-center mt-6">
             Non-admin accounts will be signed in but shown an access-denied notice.

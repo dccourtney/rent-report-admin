@@ -16,8 +16,6 @@ interface AuthState {
   error: string | null;
 
   login: () => Promise<void>;
-  loginWithEmail: (email: string) => Promise<void>;
-  verifyEmailOtp: (email: string, token: string) => Promise<void>;
   logout: () => Promise<void>;
   checkAuthStatus: () => Promise<void>;
   handleAuthCallback: () => Promise<void>;
@@ -53,26 +51,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       set({ error: message, loading: false });
       throw error;
     }
-  },
-
-  // Passwordless email sign-in. Sends a magic link that lands on /callback,
-  // where the existing SIGNED_IN handler establishes the session (same as OAuth).
-  // Component-local UI state ("check your email") is managed by the caller, so
-  // this deliberately does not touch the shared loading flag.
-  loginWithEmail: async (email: string) => {
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: `${window.location.origin}/callback` },
-    });
-    if (error) throw error;
-  },
-
-  // Verify the 6-digit code from the sign-in email. On success a session is
-  // established directly (no redirect / no PKCE verifier needed — so this also
-  // works cross-device). Caller routes to /callback to reuse post-login routing.
-  verifyEmailOtp: async (email: string, token: string) => {
-    const { error } = await supabase.auth.verifyOtp({ email, token, type: 'email' });
-    if (error) throw error;
   },
 
   logout: async () => {
