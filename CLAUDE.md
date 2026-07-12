@@ -5,6 +5,12 @@ talks to the **same Supabase project** as the main `rent-report` app (sibling di
 `../rent-report`), so it shares auth and data. Access is restricted to users whose
 `profiles.is_admin = true`.
 
+> ⚠️ **Edge functions for this app live in the sibling `../rent-report` repo, NOT here.**
+> If any admin API behavior needs to change (analytics queries, metrics, settings writes, auth
+> checks), edit and deploy the function in **`../rent-report/supabase/functions/`**
+> (`admin-analytics`, `admin-metrics`, `admin-settings`). This repo is **frontend-only** — it has
+> no `supabase/` directory and never deploys functions, migrations, or config. See below.
+
 ## Relationship to the main app
 
 - **Same Supabase project** — same auth, same `profiles`/analytics tables.
