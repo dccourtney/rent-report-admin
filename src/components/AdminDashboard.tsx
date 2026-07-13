@@ -269,8 +269,8 @@ function AnalyticsTab({
               { label: 'Inactive 14d+',   value: retention.inactive_14d },
               { label: 'Inactive 30d+',   value: retention.inactive_30d },
             ].map(({ label, value, accent }) => (
-              <div key={label} className={`rounded-xl p-4 text-center ${accent ? 'bg-orange-50' : 'bg-slate-50'}`}>
-                <p className={`text-2xl font-bold ${accent ? 'text-orange-600' : 'text-slate-900'}`}>{value}</p>
+              <div key={label} className={`rounded-xl p-4 text-center ${accent ? 'bg-orange-50 dark:bg-orange-500/15' : 'bg-slate-50'}`}>
+                <p className={`text-2xl font-bold ${accent ? 'text-orange-600 dark:text-orange-300' : 'text-slate-900'}`}>{value}</p>
                 <p className="text-xs text-slate-500 mt-1">{label}</p>
               </div>
             ))}
@@ -610,8 +610,8 @@ function ErrorsTab({
               { label: 'Signup, never returned', value: dropoffs.signup_never_returned, desc: 'Only 1 session after signup' },
               { label: 'Signup, no report',      value: dropoffs.signup_no_report,      desc: 'Never viewed a report post-signup' },
             ].map(({ label, value, desc }) => (
-              <div key={label} className={`rounded-xl p-4 ${value > 0 ? 'bg-amber-50' : 'bg-slate-50'}`}>
-                <p className={`text-2xl font-bold ${value > 0 ? 'text-amber-700' : 'text-slate-900'}`}>{value}</p>
+              <div key={label} className={`rounded-xl p-4 ${value > 0 ? 'bg-amber-50 dark:bg-amber-500/15' : 'bg-slate-50'}`}>
+                <p className={`text-2xl font-bold ${value > 0 ? 'text-amber-700 dark:text-amber-300' : 'text-slate-900'}`}>{value}</p>
                 <p className="text-xs font-semibold text-slate-700 mt-1">{label}</p>
                 <p className="text-xs text-slate-400 mt-0.5">{desc}</p>
               </div>
@@ -1218,9 +1218,9 @@ export default function AdminDashboard() {
                         </span>
                       </div>
                       {isOver && (
-                        <div className="flex items-center gap-2 mt-3 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5">
+                        <div className="flex items-center gap-2 mt-3 bg-red-50 dark:bg-red-500/15 border border-red-200 dark:border-red-500/30 rounded-xl px-4 py-2.5">
                           <AlertTriangle className="w-4 h-4 text-red-500 flex-shrink-0" />
-                          <p className="text-sm font-semibold text-red-700">
+                          <p className="text-sm font-semibold text-red-700 dark:text-red-300">
                             Over the alert threshold of {(u?.monthlyLimit ?? 0).toLocaleString()} requests for this period.
                           </p>
                         </div>
