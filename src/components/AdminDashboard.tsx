@@ -849,33 +849,56 @@ function RentcastChart({ series, bucket }: { series: RentcastSeriesPoint[] | nul
       : d.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' });
   };
   const windowLabel = bucket === 'day' ? 'last 24 hours' : bucket === 'week' ? 'last 7 days' : 'last 30 days';
+  const unit = bucket === 'day' ? 'hour' : 'day';
+  const mid  = Math.round(max / 2);
   const step = Math.max(1, Math.ceil(series.length / 12));
 
   return (
     <div>
-      <div className="flex items-end gap-1 h-32">
-        {series.map((p, i) => (
-          <div
-            key={i}
-            className="flex-1 h-full flex flex-col justify-end min-w-0"
-            title={`${label(p.bucket)}: ${p.calls.toLocaleString()} requests`}
-          >
-            <div
-              className="w-full bg-teal-400 hover:bg-teal-500 rounded-t transition-colors"
-              style={{ height: `${Math.max(2, Math.round((p.calls / max) * 100))}%` }}
-            />
+      <div className="flex gap-2">
+        {/* Y axis (requests) */}
+        <div className="flex flex-col justify-between h-32 w-7 shrink-0 text-[9px] text-slate-400 text-right leading-none">
+          <span>{max.toLocaleString()}</span>
+          <span>{mid.toLocaleString()}</span>
+          <span>0</span>
+        </div>
+        {/* Plot */}
+        <div className="flex-1 min-w-0">
+          <div className="relative h-32">
+            {/* Gridlines at 0 / mid / max */}
+            <div className="absolute inset-0 flex flex-col justify-between pointer-events-none">
+              <div className="border-t border-slate-100" />
+              <div className="border-t border-slate-100" />
+              <div className="border-t border-slate-100" />
+            </div>
+            {/* Bars */}
+            <div className="relative flex items-end gap-1 h-full">
+              {series.map((p, i) => (
+                <div
+                  key={i}
+                  className="flex-1 h-full flex flex-col justify-end min-w-0"
+                  title={`${label(p.bucket)}: ${p.calls.toLocaleString()} requests`}
+                >
+                  <div
+                    className="w-full bg-teal-400 hover:bg-teal-500 rounded-t transition-colors"
+                    style={{ height: `${p.calls > 0 ? Math.max(2, Math.round((p.calls / max) * 100)) : 0}%` }}
+                  />
+                </div>
+              ))}
+            </div>
           </div>
-        ))}
-      </div>
-      <div className="flex gap-1 mt-1">
-        {series.map((p, i) => (
-          <div key={i} className="flex-1 text-center text-[9px] text-slate-400 truncate min-w-0">
-            {i % step === 0 ? label(p.bucket) : ''}
+          {/* X axis labels */}
+          <div className="flex gap-1 mt-1">
+            {series.map((p, i) => (
+              <div key={i} className="flex-1 text-center text-[9px] text-slate-400 truncate min-w-0">
+                {i % step === 0 ? label(p.bucket) : ''}
+              </div>
+            ))}
           </div>
-        ))}
+        </div>
       </div>
       <p className="text-xs text-slate-400 mt-2">
-        {total.toLocaleString()} requests over the {windowLabel}
+        Requests per {unit} · {total.toLocaleString()} total over the {windowLabel}
       </p>
     </div>
   );
