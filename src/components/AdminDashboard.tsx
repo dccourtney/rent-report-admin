@@ -317,15 +317,26 @@ function AnalyticsTab({
 
 // ── Funnels tab ───────────────────────────────────────────────────────────────
 
+// Two separate funnels so the pricing-before-or-after-signup branching doesn't
+// distort either one.
+const ACQUISITION_STEPS = ['page_view', 'property_search_completed', 'signup_started', 'signup_completed'];
+const MONETIZATION_STEPS = ['pricing_viewed', 'checkout_started', 'purchase_completed'];
+
 function FunnelsTab({ steps, modal, loading }: { steps: FunnelStep[] | null; modal: ModalFunnelData | null; loading: boolean }) {
   if (loading) return <TabSpinner />;
   if (!steps)  return null;
 
-  const topStep = steps[0]?.unique_visitors ?? 0;
+  const pick = (names: string[]): FunnelStep[] =>
+    names.map(n => steps.find(s => s.event_name === n) ?? { event_name: n, total: 0, unique_visitors: 0 });
+
+  const acq = pick(ACQUISITION_STEPS);
+  const mon = pick(MONETIZATION_STEPS);
+  const acqTop = acq[0]?.unique_visitors ?? 0;
+  const monTop = mon[0]?.unique_visitors ?? 0;
 
   return (
     <div className="space-y-6">
-      <Section title="Acquisition funnel — anonymous → signup → purchase">
+      <Section title="Acquisition funnel — anonymous → free account">
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
@@ -338,11 +349,11 @@ function FunnelsTab({ steps, modal, loading }: { steps: FunnelStep[] | null; mod
               </tr>
             </thead>
             <tbody>
-              {steps.map((s, i) => {
-                const prev      = steps[i - 1]?.unique_visitors ?? null;
+              {acq.map((s, i) => {
+                const prev      = acq[i - 1]?.unique_visitors ?? null;
                 const dropoff   = prev ? `−${Math.round((1 - s.unique_visitors / prev) * 100)}%` : '—';
-                const fromStart = topStep > 0 ? pct(s.unique_visitors, topStep) : '—';
-                const barW      = topStep > 0 ? Math.round((s.unique_visitors / topStep) * 100) : 0;
+                const fromStart = acqTop > 0 ? pct(s.unique_visitors, acqTop) : '—';
+                const barW      = acqTop > 0 ? Math.round((s.unique_visitors / acqTop) * 100) : 0;
                 return (
                   <tr key={s.event_name} className="hover:bg-slate-50">
                     <Td>
@@ -371,7 +382,6 @@ function FunnelsTab({ steps, modal, loading }: { steps: FunnelStep[] | null; mod
                   </tr>
                 );
               })}
-              {steps.length === 0 && <EmptyRow cols={5} message="No funnel events yet" />}
             </tbody>
           </table>
         </div>
@@ -404,31 +414,26 @@ function FunnelsTab({ steps, modal, loading }: { steps: FunnelStep[] | null; mod
       )}
 
       {/* Monetization mini-funnel */}
-      <Section title="Monetization funnel — report → purchase">
+      <Section title="Monetization funnel — pricing → purchase">
         <div className="p-5">
-          {(['report_viewed', 'pricing_viewed', 'checkout_started', 'purchase_completed'] as const).map((name, i) => {
-            const s = steps.find(r => r.event_name === name);
-            if (!s) return null;
-            const topV = steps.find(r => r.event_name === 'report_viewed')?.unique_visitors ?? 1;
-            return (
-              <div key={name} className="flex items-center gap-4 py-2">
-                <span className="w-20 text-xs text-slate-500 text-right">{eventLabel(name)}</span>
-                <div className="flex-1 bg-slate-100 rounded-full h-4 overflow-hidden">
-                  <div
-                    className="h-4 bg-orange-400 rounded-full flex items-center justify-end pr-2"
-                    style={{ width: `${Math.max(4, Math.round((s.unique_visitors / topV) * 100))}%` }}
-                  >
-                    <span className="text-xs text-white font-semibold">{s.unique_visitors}</span>
-                  </div>
+          {mon.map((s, i) => (
+            <div key={s.event_name} className="flex items-center gap-4 py-2">
+              <span className="w-24 text-xs text-slate-500 text-right">{eventLabel(s.event_name)}</span>
+              <div className="flex-1 bg-slate-100 rounded-full h-4 overflow-hidden">
+                <div
+                  className="h-4 bg-orange-400 rounded-full flex items-center justify-end pr-2"
+                  style={{ width: `${Math.max(4, monTop > 0 ? Math.round((s.unique_visitors / monTop) * 100) : 0)}%` }}
+                >
+                  <span className="text-xs text-white font-semibold">{s.unique_visitors}</span>
                 </div>
-                {i > 0 && (
-                  <span className="w-12 text-xs text-red-500 font-semibold">
-                    {pct(s.unique_visitors, steps.find(r => r.event_name === ['report_viewed', 'pricing_viewed', 'checkout_started', 'purchase_completed'][i - 1])?.unique_visitors ?? 0)}
-                  </span>
-                )}
               </div>
-            );
-          })}
+              {i > 0 && (
+                <span className="w-12 text-xs text-red-500 font-semibold">
+                  {pct(s.unique_visitors, mon[i - 1]?.unique_visitors ?? 0)}
+                </span>
+              )}
+            </div>
+          ))}
         </div>
       </Section>
     </div>
