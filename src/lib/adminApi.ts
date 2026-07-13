@@ -129,8 +129,18 @@ export async function fetchAdminMetrics(): Promise<AdminMetricsResult> {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return { status: 'forbidden' };
 
+    // Compute "today" / "this month" in the viewer's local timezone so the
+    // counts match the locally-displayed signup dates (browser Date handles the
+    // tz natively; we send the boundaries as UTC ISO).
+    const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
+    const monthStart = new Date(midnight.getFullYear(), midnight.getMonth(), 1);
+    const qs = new URLSearchParams({
+      todayStart: midnight.toISOString(),
+      monthStart: monthStart.toISOString(),
+    });
+
     const res = await fetch(
-      `${SUPABASE_URL}/functions/v1/admin-metrics`,
+      `${SUPABASE_URL}/functions/v1/admin-metrics?${qs}`,
       {
         headers: {
           apikey:        import.meta.env.VITE_SUPABASE_ANON_KEY as string,
