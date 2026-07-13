@@ -836,12 +836,14 @@ function RentcastChart({ series, bucket }: { series: RentcastSeriesPoint[] | nul
 
   const max   = Math.max(...series.map(p => p.calls), 1);
   const total = series.reduce((s, p) => s + p.calls, 0);
+  // Day view = hourly buckets → time labels; week/month = daily buckets → dates.
   const label = (iso: string) => {
     const d = new Date(iso);
-    return bucket === 'month'
-      ? d.toLocaleDateString('en-US', { month: 'short' })
+    return bucket === 'day'
+      ? d.toLocaleTimeString('en-US', { hour: 'numeric' })
       : d.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' });
   };
+  const windowLabel = bucket === 'day' ? 'last 24 hours' : bucket === 'week' ? 'last 7 days' : 'last 30 days';
   const step = Math.max(1, Math.ceil(series.length / 12));
 
   return (
@@ -868,7 +870,7 @@ function RentcastChart({ series, bucket }: { series: RentcastSeriesPoint[] | nul
         ))}
       </div>
       <p className="text-xs text-slate-400 mt-2">
-        {total.toLocaleString()} requests over the last {series.length} {bucket}{series.length !== 1 ? 's' : ''}
+        {total.toLocaleString()} requests over the {windowLabel}
       </p>
     </div>
   );
