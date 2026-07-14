@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   RefreshCw, TrendingUp, Users, DollarSign, ShieldAlert, Search,
   AlertTriangle, BarChart2, GitBranch, Map, AlertCircle, Zap,
-  ChevronDown, ChevronRight,
+  ChevronDown, ChevronRight, Mail, Send,
 } from 'lucide-react';
 import { useAuthStore } from '../stores/authStore';
 import { useProfileStore } from '../stores/profileStore';
@@ -19,6 +19,8 @@ import {
   AnalyticsOverview, RetentionData, FunnelStep, GroupedFeature,
   JourneyRow, JourneyEvent, ErrorRow, DropoffData, TopUserRow, ModalFunnelData,
   RentcastBucket, RentcastSeriesPoint,
+  fetchLifecycleOverview, fetchLifecycleUserHistory,
+  LifecycleData, LifecycleHistoryRow,
 } from '../lib/adminAnalyticsApi';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -194,16 +196,180 @@ function DateRangeSelector({ value, onChange }: { value: DateRange; onChange: (r
 
 // ── Tab bar ───────────────────────────────────────────────────────────────────
 
-type AdminTab = 'overview' | 'analytics' | 'funnels' | 'journeys' | 'errors' | 'users';
+type AdminTab = 'overview' | 'analytics' | 'funnels' | 'journeys' | 'errors' | 'users' | 'lifecycle';
 
 const TABS: Array<{ id: AdminTab; label: string; icon: React.ReactNode }> = [
   { id: 'overview',  label: 'Overview',   icon: <TrendingUp className="w-3.5 h-3.5" /> },
   { id: 'analytics', label: 'Analytics',  icon: <BarChart2  className="w-3.5 h-3.5" /> },
+  { id: 'lifecycle', label: 'Lifecycle',  icon: <Mail       className="w-3.5 h-3.5" /> },
   { id: 'funnels',   label: 'Funnels',    icon: <GitBranch  className="w-3.5 h-3.5" /> },
   { id: 'journeys',  label: 'Journeys',   icon: <Map        className="w-3.5 h-3.5" /> },
   { id: 'errors',    label: 'Errors',     icon: <AlertCircle className="w-3.5 h-3.5" /> },
   { id: 'users',     label: 'Users',      icon: <Zap        className="w-3.5 h-3.5" /> },
 ];
+
+// ── Lifecycle tab ─────────────────────────────────────────────────────────────
+
+const pctStr = (n: number) => `${n}%`;
+
+function FunnelBar({ label, value, of, color }: { label: string; value: number; of: number; color: string }) {
+  const w = of > 0 ? Math.round((value / of) * 100) : 0;
+  return (
+    <div className="flex items-center gap-3">
+      <div className="w-24 text-xs font-medium text-slate-500 text-right">{label}</div>
+      <div className="flex-1 bg-slate-100 rounded-lg h-7 overflow-hidden">
+        <div className={`h-full ${color} rounded-lg`} style={{ width: `${value > 0 ? Math.max(w, 4) : 0}%` }} />
+      </div>
+      <div className="w-28 text-xs text-slate-600 tabular-nums">
+        {value.toLocaleString()} <span className="text-slate-400">({w}%)</span>
+      </div>
+    </div>
+  );
+}
+
+function LifecycleTab({ data, loading }: { data: LifecycleData | null; loading: boolean }) {
+  const [uid, setUid] = useState('');
+  const [history, setHistory] = useState<LifecycleHistoryRow[] | null>(null);
+  const [histLoading, setHistLoading] = useState(false);
+
+  const lookup = async () => {
+    if (!uid.trim()) return;
+    setHistLoading(true);
+    const res = await fetchLifecycleUserHistory(uid.trim());
+    setHistLoading(false);
+    setHistory(res.status === 'ok' ? res.data.history : []);
+  };
+
+  if (loading) return <TabSpinner />;
+  if (!data) return <div className="text-center py-16 text-slate-400">No data</div>;
+
+  const s = data.summary;
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+        <StatCard label="Sent"              value={s.sent.toLocaleString()}      icon={<Send className="w-4 h-4" />} />
+        <StatCard label="Delivered"         value={s.delivered.toLocaleString()} icon={<Mail className="w-4 h-4" />} />
+        <StatCard label="Open rate"         value={pctStr(s.openRate)}           icon={<TrendingUp className="w-4 h-4" />} />
+        <StatCard label="Click rate"        value={pctStr(s.ctr)}                icon={<BarChart2 className="w-4 h-4" />} />
+        <StatCard label="Conversions"       value={s.conversions.toLocaleString()} sub={`${s.convRate}% of sent`} accent icon={<Zap className="w-4 h-4" />} />
+        <StatCard label="Revenue attributed" value={fmt$(s.revenueAttributed)}   icon={<DollarSign className="w-4 h-4" />} />
+      </div>
+
+      <Section title="Funnel">
+        <div className="p-5 space-y-2">
+          <FunnelBar label="Sent"      value={s.sent}        of={s.sent} color="bg-slate-400" />
+          <FunnelBar label="Delivered" value={s.delivered}   of={s.sent} color="bg-teal-400" />
+          <FunnelBar label="Opened"    value={s.opened}      of={s.sent} color="bg-sky-400" />
+          <FunnelBar label="Clicked"   value={s.clicked}     of={s.sent} color="bg-indigo-400" />
+          <FunnelBar label="Converted" value={s.conversions} of={s.sent} color="bg-orange-500" />
+        </div>
+      </Section>
+
+      <Section title="Email performance">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead><tr>
+              <Th>Email</Th><Th>Campaign</Th><Th>Sent</Th><Th>Open %</Th><Th>CTR</Th><Th>CTOR</Th><Th>Conv %</Th>
+            </tr></thead>
+            <tbody>
+              {data.byEmail.length === 0 ? <EmptyRow cols={7} /> : data.byEmail.map((e) => (
+                <tr key={e.email_key}>
+                  <Td mono>{e.email_key}</Td>
+                  <Td muted>{e.campaign}</Td>
+                  <Td right>{e.sent.toLocaleString()}</Td>
+                  <Td right>{pctStr(e.openRate)}</Td>
+                  <Td right>{pctStr(e.ctr)}</Td>
+                  <Td right>{pctStr(e.ctor)}</Td>
+                  <Td right>{pctStr(e.convRate)}</Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Section>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Section title="By campaign">
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead><tr><Th>Campaign</Th><Th>Sent</Th><Th>Open %</Th><Th>Conv %</Th></tr></thead>
+              <tbody>
+                {data.byCampaign.length === 0 ? <EmptyRow cols={4} /> : data.byCampaign.map((c) => (
+                  <tr key={c.campaign}>
+                    <Td>{c.campaign}</Td>
+                    <Td right>{c.sent.toLocaleString()}</Td>
+                    <Td right>{pctStr(c.openRate)}</Td>
+                    <Td right>{pctStr(c.convRate)}</Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Section>
+
+        <Section title="Sends by day">
+          <div className="p-5">
+            {data.byDay.length === 0 ? (
+              <p className="text-sm text-slate-400 text-center py-6">No data yet</p>
+            ) : (
+              <div className="flex items-end gap-1 h-32">
+                {data.byDay.map((d) => {
+                  const max = Math.max(...data.byDay.map((x) => x.sent), 1);
+                  return (
+                    <div key={d.day} className="flex-1 flex flex-col justify-end min-w-0"
+                      title={`${d.day}: ${d.sent} sent · ${d.opened} opened · ${d.clicked} clicked`}>
+                      <div className="w-full bg-teal-400 hover:bg-teal-500 rounded-t transition-colors"
+                        style={{ height: `${Math.max(2, Math.round((d.sent / max) * 100))}%` }} />
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </Section>
+      </div>
+
+      <Section title="Per-user history">
+        <div className="p-5 space-y-4">
+          <div className="flex gap-2">
+            <input
+              value={uid}
+              onChange={(e) => setUid(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && lookup()}
+              placeholder="user_id (UUID)"
+              className="flex-1 px-3 py-2 text-sm rounded-lg ring-1 ring-slate-200 bg-white text-slate-900 focus:outline-none focus:ring-orange-400"
+            />
+            <button onClick={lookup} className="px-4 py-2 text-sm font-semibold rounded-lg bg-orange-500 text-white hover:bg-orange-600">
+              Look up
+            </button>
+          </div>
+          {histLoading ? <TabSpinner /> : history && (
+            history.length === 0 ? (
+              <p className="text-sm text-slate-400">No lifecycle emails for this user.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead><tr><Th>Email</Th><Th>Sent</Th><Th>Opened</Th><Th>Clicked</Th><Th>Converted</Th></tr></thead>
+                  <tbody>
+                    {history.map((h, i) => (
+                      <tr key={i}>
+                        <Td mono>{h.email_key}</Td>
+                        <Td muted>{fmtDate(h.sent_at)}</Td>
+                        <Td>{h.opened_at ? '✓' : '—'}</Td>
+                        <Td>{h.clicked_at ? '✓' : '—'}</Td>
+                        <Td>{h.goal_completed_at ? '✓' : '—'}</Td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
+          )}
+        </div>
+      </Section>
+    </div>
+  );
+}
 
 // ── Analytics tab ─────────────────────────────────────────────────────────────
 
@@ -943,6 +1109,7 @@ export default function AdminDashboard() {
   const [errorRows,          setErrorRows]        = useState<ErrorRow[] | null>(null);
   const [dropoffs,           setDropoffs]         = useState<DropoffData | null>(null);
   const [topUsers,          setTopUsers]        = useState<TopUserRow[] | null>(null);
+  const [lifecycleData,     setLifecycleData]   = useState<LifecycleData | null>(null);
 
   // Track which (tab, range) combos have been loaded to avoid redundant fetches
   const loadedRef = useRef<Set<string>>(new Set());
@@ -1034,6 +1201,9 @@ export default function AdminDashboard() {
       } else if (tab === 'users') {
         const res = await fetchTopUsers();
         if (res.status === 'ok') setTopUsers(res.data);
+      } else if (tab === 'lifecycle') {
+        const res = await fetchLifecycleOverview(range);
+        if (res.status === 'ok') setLifecycleData(res.data);
       }
     } finally {
       setTabLoading(false);
@@ -1057,6 +1227,7 @@ export default function AdminDashboard() {
     setErrorRows(null);
     setDropoffs(null);
     setTopUsers(null);
+    setLifecycleData(null);
     setDateRange(range);
     loadAnalyticsTab(activeTab, range);
   };
@@ -1072,6 +1243,7 @@ export default function AdminDashboard() {
     setErrorRows(null);
     setDropoffs(null);
     setTopUsers(null);
+    setLifecycleData(null);
     loadMetrics();
     if (activeTab !== 'overview') {
       loadAnalyticsTab(activeTab, dateRange);
@@ -1437,6 +1609,10 @@ export default function AdminDashboard() {
         {/* ── Users (power users) tab ────────────────────────────────────── */}
         {activeTab === 'users' && (
           <TopUsersTab rows={topUsers} loading={tabLoading} />
+        )}
+
+        {activeTab === 'lifecycle' && (
+          <LifecycleTab data={lifecycleData} loading={tabLoading} />
         )}
 
       </div>

@@ -130,6 +130,61 @@ async function fetchAnalytics<T>(
   }
 }
 
+// ── Lifecycle emails ────────────────────────────────────────────────────────
+
+export interface LifecycleRates {
+  sent: number; delivered: number; opened: number; clicked: number;
+  bounced: number; unsubscribed: number; conversions: number;
+  openRate: number; ctr: number; ctor: number; convRate: number;
+}
+export interface LifecycleEmailStat extends LifecycleRates { email_key: string; campaign: string; goal: string; }
+export interface LifecycleCampaignStat extends LifecycleRates { campaign: string; }
+export interface LifecycleDayStat { day: string; sent: number; opened: number; clicked: number; }
+export interface LifecycleSummary extends LifecycleRates { revenueAttributed: number; }
+export interface LifecycleData {
+  range: DateRange;
+  summary: LifecycleSummary;
+  byEmail: LifecycleEmailStat[];
+  byCampaign: LifecycleCampaignStat[];
+  byDay: LifecycleDayStat[];
+}
+export interface LifecycleHistoryRow {
+  email_key: string; campaign: string; goal: string; status: string;
+  sent_at: string | null; delivered_at: string | null; opened_at: string | null;
+  clicked_at: string | null; bounced_at: string | null; unsubscribed_at: string | null;
+  goal_completed_at: string | null;
+}
+
+// Same shape as fetchAnalytics but hits the admin-lifecycle function.
+async function fetchLifecycleFn<T>(
+  action: string, range: DateRange, extra?: Record<string, unknown>,
+): Promise<AnalyticsResult<T>> {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return { status: 'forbidden' };
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/admin-lifecycle`, {
+      method: 'POST',
+      headers: {
+        apikey: ANON_KEY,
+        Authorization: `Bearer ${session.access_token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ action, range, ...extra }),
+    });
+    if (res.status === 401 || res.status === 403) return { status: 'forbidden' };
+    const body = await res.json();
+    if (!res.ok) return { status: 'error', message: body.error ?? 'Unknown error' };
+    return { status: 'ok', data: body as T };
+  } catch (err) {
+    return { status: 'error', message: String(err) };
+  }
+}
+
+export const fetchLifecycleOverview = (range: DateRange) =>
+  fetchLifecycleFn<LifecycleData>('overview', range);
+export const fetchLifecycleUserHistory = (userId: string) =>
+  fetchLifecycleFn<{ history: LifecycleHistoryRow[] }>('user_history', 'all', { user_id: userId });
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export const fetchAnalyticsOverview = (range: DateRange) =>
