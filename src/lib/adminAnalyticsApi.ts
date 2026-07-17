@@ -102,6 +102,21 @@ type AnalyticsResult<T> =
   | { status: 'forbidden' }
   | { status: 'error';     message: string };
 
+// The browser knows its own timezone, so it computes the range start locally
+// ("today" = local midnight) and sends the IANA zone for server-side day bucketing.
+const browserTz = () => {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch { return 'UTC'; }
+};
+
+function rangeFromISO(range: DateRange): string | null {
+  if (range === 'all') return null;
+  const now = new Date();
+  if (range === 'today') { const d = new Date(now); d.setHours(0, 0, 0, 0); return d.toISOString(); }
+  if (range === '7d')  return new Date(now.getTime() - 7  * 86_400_000).toISOString();
+  if (range === '30d') return new Date(now.getTime() - 30 * 86_400_000).toISOString();
+  return null;
+}
+
 async function fetchAnalytics<T>(
   action: string,
   range: DateRange,
@@ -118,7 +133,7 @@ async function fetchAnalytics<T>(
         Authorization:  `Bearer ${session.access_token}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ action, range, ...extra }),
+      body: JSON.stringify({ action, range, from: rangeFromISO(range), tz: browserTz(), ...extra }),
     });
 
     if (res.status === 401 || res.status === 403) return { status: 'forbidden' };
