@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   RefreshCw, TrendingUp, Users, DollarSign, ShieldAlert, Search,
   AlertTriangle, BarChart2, GitBranch, Map, AlertCircle, Zap,
-  ChevronDown, ChevronRight, Mail, Send,
+  ChevronDown, ChevronRight, Mail, Send, Wrench,
 } from 'lucide-react';
 import { useAuthStore } from '../stores/authStore';
 import { useProfileStore } from '../stores/profileStore';
@@ -21,6 +21,10 @@ import {
   RentcastBucket, RentcastSeriesPoint,
   fetchLifecycleOverview, fetchLifecycleUserHistory,
   LifecycleData, LifecycleHistoryRow,
+  fetchToolsOverview, fetchToolsByTool, fetchToolsTrend,
+  fetchToolsAcquisition, fetchToolsFunnel, fetchToolsLinkSources,
+  ToolsOverview, ToolByToolRow, ToolsTrendPoint, ToolsAcquisition,
+  ToolsFunnelStep, ToolsLinkSource, TOOL_NAME, TOOL_FUNNEL_LABELS,
 } from '../lib/adminAnalyticsApi';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -196,7 +200,7 @@ function DateRangeSelector({ value, onChange }: { value: DateRange; onChange: (r
 
 // ── Tab bar ───────────────────────────────────────────────────────────────────
 
-type AdminTab = 'overview' | 'analytics' | 'funnels' | 'journeys' | 'errors' | 'users' | 'lifecycle';
+type AdminTab = 'overview' | 'analytics' | 'funnels' | 'journeys' | 'errors' | 'users' | 'lifecycle' | 'tools';
 
 const TABS: Array<{ id: AdminTab; label: string; icon: React.ReactNode }> = [
   { id: 'overview',  label: 'Overview',   icon: <TrendingUp className="w-3.5 h-3.5" /> },
@@ -206,6 +210,7 @@ const TABS: Array<{ id: AdminTab; label: string; icon: React.ReactNode }> = [
   { id: 'journeys',  label: 'Journeys',   icon: <Map        className="w-3.5 h-3.5" /> },
   { id: 'errors',    label: 'Errors',     icon: <AlertCircle className="w-3.5 h-3.5" /> },
   { id: 'users',     label: 'Users',      icon: <Zap        className="w-3.5 h-3.5" /> },
+  { id: 'tools',     label: 'Tools & SEO', icon: <Wrench     className="w-3.5 h-3.5" /> },
 ];
 
 // ── Lifecycle tab ─────────────────────────────────────────────────────────────
@@ -1070,6 +1075,242 @@ function RentcastChart({ series, bucket }: { series: RentcastSeriesPoint[] | nul
   );
 }
 
+// ── Tools & SEO tab ───────────────────────────────────────────────────────────
+
+const TREND_METRICS: Array<{ key: keyof ToolsTrendPoint; label: string; color: string }> = [
+  { key: 'tool_visitors', label: 'Tool visitors', color: 'bg-orange-400' },
+  { key: 'calculations',  label: 'Calculations',  color: 'bg-teal-400' },
+  { key: 'cta_clicks',    label: 'CTA clicks',     color: 'bg-amber-400' },
+  { key: 'searches',      label: 'Property searches', color: 'bg-sky-400' },
+  { key: 'signups',       label: 'Signups',        color: 'bg-violet-400' },
+  { key: 'purchases',     label: 'Purchases',      color: 'bg-rose-400' },
+];
+
+function ToolsTrendChart({ series, metricKey, color }: { series: ToolsTrendPoint[]; metricKey: keyof ToolsTrendPoint; color: string }) {
+  if (series.length === 0) {
+    return <div className="h-32 flex items-center justify-center text-sm text-slate-400">No activity in this range yet.</div>;
+  }
+  const vals = series.map((p) => Number(p[metricKey]) || 0);
+  const max = Math.max(...vals, 1);
+  const total = vals.reduce((s, n) => s + n, 0);
+  const step = Math.max(1, Math.ceil(series.length / 12));
+  const label = (iso: string) => new Date(iso).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' });
+  return (
+    <div>
+      <div className="flex gap-2">
+        <div className="flex flex-col justify-between h-32 w-7 shrink-0 text-[9px] text-slate-400 text-right leading-none">
+          <span>{max.toLocaleString()}</span><span>{Math.round(max / 2).toLocaleString()}</span><span>0</span>
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="relative h-32">
+            <div className="absolute inset-0 flex flex-col justify-between pointer-events-none">
+              <div className="border-t border-slate-100" /><div className="border-t border-slate-100" /><div className="border-t border-slate-100" />
+            </div>
+            <div className="relative flex items-end gap-1 h-full">
+              {series.map((p, i) => (
+                <div key={i} className="flex-1 h-full flex flex-col justify-end min-w-0" title={`${label(p.bucket)}: ${vals[i].toLocaleString()}`}>
+                  <div className={`w-full ${color} rounded-t transition-colors`} style={{ height: `${vals[i] > 0 ? Math.max(2, Math.round((vals[i] / max) * 100)) : 0}%` }} />
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="flex gap-1 mt-1">
+            {series.map((p, i) => (
+              <div key={i} className="flex-1 text-center text-[9px] text-slate-400 truncate min-w-0">{i % step === 0 ? label(p.bucket) : ''}</div>
+            ))}
+          </div>
+        </div>
+      </div>
+      <p className="text-xs text-slate-400 mt-2">{total.toLocaleString()} total over the selected range</p>
+    </div>
+  );
+}
+
+type ToolSortKey = keyof ToolByToolRow;
+
+function ToolsTab({
+  overview, byTool, trend, acquisition, funnel, linkSources, loading,
+}: {
+  overview: ToolsOverview | null;
+  byTool: ToolByToolRow[] | null;
+  trend: ToolsTrendPoint[] | null;
+  acquisition: ToolsAcquisition | null;
+  funnel: ToolsFunnelStep[] | null;
+  linkSources: ToolsLinkSource[] | null;
+  loading: boolean;
+}) {
+  const [metric, setMetric] = useState<keyof ToolsTrendPoint>('tool_visitors');
+  const [sortKey, setSortKey] = useState<ToolSortKey>('page_views');
+
+  if (loading && !overview) return <TabSpinner />;
+
+  const rate = (x: number | null | undefined) => (x == null ? '—' : `${x}%`);
+  const num = (x: number | null | undefined) => (x == null ? '0' : Number(x).toLocaleString());
+
+  const kpis: Array<{ label: string; value: string; accent?: boolean; icon: React.ReactNode }> = overview
+    ? [
+        { label: 'Directory visitors', value: num(overview.directory_visitors), icon: <Map className="w-4 h-4" /> },
+        { label: 'Tool visitors', value: num(overview.tool_visitors), icon: <Users className="w-4 h-4" /> },
+        { label: 'Tool starts', value: num(overview.tool_starts), icon: <Wrench className="w-4 h-4" /> },
+        { label: 'Calculations', value: num(overview.calculations), icon: <BarChart2 className="w-4 h-4" /> },
+        { label: 'Completion rate', value: rate(overview.completion_rate), icon: <TrendingUp className="w-4 h-4" /> },
+        { label: 'CTA clicks', value: num(overview.cta_clicks), icon: <Search className="w-4 h-4" /> },
+        { label: 'Tool → search rate', value: rate(overview.tool_to_search_rate), icon: <GitBranch className="w-4 h-4" /> },
+        { label: 'Tool-assisted signups', value: num(overview.tool_assisted_signups), icon: <Users className="w-4 h-4" /> },
+        { label: 'Tool-assisted purchases', value: num(overview.tool_assisted_purchases), accent: true, icon: <DollarSign className="w-4 h-4" /> },
+        { label: 'Tool-assisted revenue', value: fmt$(Number(overview.tool_assisted_revenue) || 0), accent: true, icon: <DollarSign className="w-4 h-4" /> },
+        { label: 'Returning tool users', value: num(overview.returning_tool_users), icon: <RefreshCw className="w-4 h-4" /> },
+      ]
+    : [];
+
+  const sortedTools = byTool
+    ? [...byTool].sort((a, b) => {
+        if (sortKey === 'tool_id') return a.tool_id.localeCompare(b.tool_id);
+        return (Number(b[sortKey]) || 0) - (Number(a[sortKey]) || 0);
+      })
+    : [];
+
+  const funnelTop = funnel && funnel.length > 0 ? funnel[0].total : 0;
+  const activeMetric = TREND_METRICS.find((m) => m.key === metric)!;
+
+  const SortableTh = ({ k, children }: { k: ToolSortKey; children: React.ReactNode }) => (
+    <th
+      onClick={() => setSortKey(k)}
+      className={`px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide bg-slate-50 cursor-pointer select-none ${sortKey === k ? 'text-orange-600' : 'text-slate-500 hover:text-slate-700'}`}
+    >
+      {children}
+    </th>
+  );
+
+  return (
+    <div className="space-y-6">
+      {/* KPI cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+        {kpis.length === 0
+          ? <div className="col-span-full text-center text-sm text-slate-400 py-8">No tool activity in this range yet.</div>
+          : kpis.map((k) => <StatCard key={k.label} label={k.label} value={k.value} accent={k.accent} icon={k.icon} />)}
+      </div>
+
+      {/* Trend */}
+      <Section
+        title="Trend"
+        action={
+          <select
+            value={metric}
+            onChange={(e) => setMetric(e.target.value as keyof ToolsTrendPoint)}
+            className="text-xs border border-slate-200 rounded-lg px-2 py-1 text-slate-600"
+          >
+            {TREND_METRICS.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
+          </select>
+        }
+      >
+        <div className="p-5">
+          {trend === null ? <div className="h-32 flex items-center justify-center text-sm text-slate-400">Loading…</div>
+            : <ToolsTrendChart series={trend} metricKey={metric} color={activeMetric.color} />}
+        </div>
+      </Section>
+
+      {/* Per-tool performance */}
+      <Section title="Performance by tool">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr>
+                <SortableTh k="tool_id">Tool</SortableTh>
+                <SortableTh k="page_views">Views</SortableTh>
+                <SortableTh k="unique_visitors">Visitors</SortableTh>
+                <SortableTh k="starts">Starts</SortableTh>
+                <SortableTh k="calculations">Calcs</SortableTh>
+                <SortableTh k="completion_rate">Compl.</SortableTh>
+                <SortableTh k="cta_views">CTA views</SortableTh>
+                <SortableTh k="cta_clicks">CTA clicks</SortableTh>
+                <SortableTh k="cta_ctr">CTA CTR</SortableTh>
+                <SortableTh k="searches_started">Searches</SortableTh>
+                <SortableTh k="search_conv_rate">Search conv.</SortableTh>
+                <SortableTh k="signups">Signups</SortableTh>
+                <SortableTh k="purchases">Purchases</SortableTh>
+                <SortableTh k="revenue">Revenue</SortableTh>
+              </tr>
+            </thead>
+            <tbody>
+              {sortedTools.length === 0
+                ? <EmptyRow cols={14} message="No tool activity yet" />
+                : sortedTools.map((t) => (
+                    <tr key={t.tool_id}>
+                      <Td>{TOOL_NAME[t.tool_id] ?? t.tool_id}</Td>
+                      <Td right>{num(t.page_views)}</Td>
+                      <Td right>{num(t.unique_visitors)}</Td>
+                      <Td right>{num(t.starts)}</Td>
+                      <Td right>{num(t.calculations)}</Td>
+                      <Td right>{rate(t.completion_rate)}</Td>
+                      <Td right>{num(t.cta_views)}</Td>
+                      <Td right>{num(t.cta_clicks)}</Td>
+                      <Td right>{rate(t.cta_ctr)}</Td>
+                      <Td right>{num(t.searches_started)}</Td>
+                      <Td right>{rate(t.search_conv_rate)}</Td>
+                      <Td right>{num(t.signups)}</Td>
+                      <Td right>{num(t.purchases)}</Td>
+                      <Td right>{fmt$(Number(t.revenue) || 0)}</Td>
+                    </tr>
+                  ))}
+            </tbody>
+          </table>
+        </div>
+      </Section>
+
+      {/* Funnel */}
+      <Section title="Tool funnel">
+        <div className="p-5 space-y-2">
+          {funnel === null || funnel.length === 0
+            ? <p className="text-sm text-slate-400 text-center py-4">No funnel data yet</p>
+            : funnel.map((s) => (
+                <FunnelBar key={s.step} label={TOOL_FUNNEL_LABELS[s.step] ?? s.step} value={s.unique_visitors} of={funnelTop || 1} color="bg-orange-400" />
+              ))}
+        </div>
+      </Section>
+
+      {/* Acquisition + link sources */}
+      <div className="grid md:grid-cols-2 gap-6">
+        <Section title="Acquisition (tool visitors)">
+          <div className="p-5 space-y-2">
+            {!acquisition || acquisition.channels.length === 0
+              ? <p className="text-sm text-slate-400 text-center py-4">No acquisition data yet</p>
+              : (
+                <>
+                  {acquisition.channels.map((c) => (
+                    <FunnelBar key={c.channel} label={c.channel} value={c.visitors}
+                      of={acquisition.channels.reduce((s, x) => s + x.visitors, 0) || 1} color="bg-sky-400" />
+                  ))}
+                  {acquisition.campaigns.length > 0 && (
+                    <div className="pt-3 mt-3 border-t border-slate-100">
+                      <p className="text-xs font-semibold text-slate-400 uppercase mb-2">Top campaigns</p>
+                      {acquisition.campaigns.slice(0, 5).map((c) => (
+                        <div key={c.campaign} className="flex justify-between text-xs text-slate-600 py-0.5">
+                          <span className="truncate mr-2">{c.campaign}</span><span className="tabular-nums">{c.visitors.toLocaleString()}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+          </div>
+        </Section>
+
+        <Section title="Discovery by link source">
+          <div className="p-5 space-y-2">
+            {!linkSources || linkSources.length === 0
+              ? <p className="text-sm text-slate-400 text-center py-4">No link clicks yet</p>
+              : linkSources.map((s) => (
+                  <FunnelBar key={s.source_location} label={s.source_location.replace(/_/g, ' ')} value={s.clicks}
+                    of={linkSources.reduce((a, x) => a + x.clicks, 0) || 1} color="bg-teal-400" />
+                ))}
+          </div>
+        </Section>
+      </div>
+    </div>
+  );
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 export default function AdminDashboard() {
@@ -1110,6 +1351,14 @@ export default function AdminDashboard() {
   const [dropoffs,           setDropoffs]         = useState<DropoffData | null>(null);
   const [topUsers,          setTopUsers]        = useState<TopUserRow[] | null>(null);
   const [lifecycleData,     setLifecycleData]   = useState<LifecycleData | null>(null);
+
+  // Tools & SEO tab state
+  const [toolsOverview, setToolsOverview] = useState<ToolsOverview | null>(null);
+  const [toolsByTool,   setToolsByTool]   = useState<ToolByToolRow[] | null>(null);
+  const [toolsTrend,    setToolsTrend]    = useState<ToolsTrendPoint[] | null>(null);
+  const [toolsAcq,      setToolsAcq]      = useState<ToolsAcquisition | null>(null);
+  const [toolsFunnel,   setToolsFunnel]   = useState<ToolsFunnelStep[] | null>(null);
+  const [toolsLinks,    setToolsLinks]    = useState<ToolsLinkSource[] | null>(null);
 
   // Track which (tab, range) combos have been loaded to avoid redundant fetches
   const loadedRef = useRef<Set<string>>(new Set());
@@ -1204,6 +1453,21 @@ export default function AdminDashboard() {
       } else if (tab === 'lifecycle') {
         const res = await fetchLifecycleOverview(range);
         if (res.status === 'ok') setLifecycleData(res.data);
+      } else if (tab === 'tools') {
+        const [ov, bt, tr, ac, fn, ls] = await Promise.all([
+          fetchToolsOverview(range),
+          fetchToolsByTool(range),
+          fetchToolsTrend(range, 'day'),
+          fetchToolsAcquisition(range),
+          fetchToolsFunnel(range),
+          fetchToolsLinkSources(range),
+        ]);
+        if (ov.status === 'ok') setToolsOverview(ov.data);
+        if (bt.status === 'ok') setToolsByTool(bt.data);
+        if (tr.status === 'ok') setToolsTrend(tr.data);
+        if (ac.status === 'ok') setToolsAcq(ac.data);
+        if (fn.status === 'ok') setToolsFunnel(fn.data);
+        if (ls.status === 'ok') setToolsLinks(ls.data);
       }
     } finally {
       setTabLoading(false);
@@ -1228,6 +1492,8 @@ export default function AdminDashboard() {
     setDropoffs(null);
     setTopUsers(null);
     setLifecycleData(null);
+    setToolsOverview(null); setToolsByTool(null); setToolsTrend(null);
+    setToolsAcq(null); setToolsFunnel(null); setToolsLinks(null);
     setDateRange(range);
     loadAnalyticsTab(activeTab, range);
   };
@@ -1244,6 +1510,8 @@ export default function AdminDashboard() {
     setDropoffs(null);
     setTopUsers(null);
     setLifecycleData(null);
+    setToolsOverview(null); setToolsByTool(null); setToolsTrend(null);
+    setToolsAcq(null); setToolsFunnel(null); setToolsLinks(null);
     loadMetrics();
     if (activeTab !== 'overview') {
       loadAnalyticsTab(activeTab, dateRange);
@@ -1613,6 +1881,18 @@ export default function AdminDashboard() {
 
         {activeTab === 'lifecycle' && (
           <LifecycleTab data={lifecycleData} loading={tabLoading} />
+        )}
+
+        {activeTab === 'tools' && (
+          <ToolsTab
+            overview={toolsOverview}
+            byTool={toolsByTool}
+            trend={toolsTrend}
+            acquisition={toolsAcq}
+            funnel={toolsFunnel}
+            linkSources={toolsLinks}
+            loading={tabLoading}
+          />
         )}
 
       </div>

@@ -251,6 +251,102 @@ export interface RentcastSeriesPoint {
 export const fetchRentcastSeries = (bucket: RentcastBucket) =>
   fetchAnalytics<RentcastSeriesPoint[]>('rentcast_series', 'all', { bucket });
 
+// ── Tools & SEO ─────────────────────────────────────────────────────────────
+
+export interface ToolsOverview {
+  directory_visitors:        number;
+  tool_visitors:             number;
+  tool_starts:               number;
+  calculations:              number;
+  sessions_started:          number;
+  sessions_calculated:       number;
+  completion_rate:           number | null;   // % — null when no starts yet
+  cta_clicks:                number;
+  sessions_tool_viewed:      number;
+  sessions_search_from_tool: number;
+  tool_to_search_rate:       number | null;   // % — null when no tool views yet
+  tool_assisted_signups:     number;
+  tool_assisted_purchases:   number;
+  tool_assisted_revenue:     number;
+  returning_tool_users:      number;
+}
+
+export interface ToolByToolRow {
+  tool_id:          string;
+  page_views:       number;
+  unique_visitors:  number;
+  starts:           number;
+  calculations:     number;
+  completion_rate:  number | null;
+  cta_views:        number;
+  cta_clicks:       number;
+  cta_ctr:          number | null;
+  searches_started: number;
+  search_conv_rate: number | null;
+  signups:          number;
+  purchases:        number;
+  revenue:          number;
+}
+
+export interface ToolsTrendPoint {
+  bucket:        string;
+  tool_visitors: number;
+  calculations:  number;
+  cta_clicks:    number;
+  searches:      number;
+  signups:       number;
+  purchases:     number;
+}
+
+export interface ToolsAcquisition {
+  channels:  Array<{ channel: string; visitors: number }>;
+  campaigns: Array<{ campaign: string; visitors: number }>;
+}
+
+export interface ToolsFunnelStep {
+  step:            string;
+  total:           number;
+  unique_visitors: number;
+}
+
+export interface ToolsLinkSource {
+  source_location: string;
+  clicks:          number;
+}
+
+export const fetchToolsOverview = (range: DateRange) =>
+  fetchAnalytics<ToolsOverview>('tools_overview', range);
+export const fetchToolsByTool = (range: DateRange) =>
+  fetchAnalytics<ToolByToolRow[]>('tools_by_tool', range);
+export const fetchToolsTrend = (range: DateRange, bucket: 'day' | 'week') =>
+  fetchAnalytics<ToolsTrendPoint[]>('tools_trend', range, { bucket });
+export const fetchToolsAcquisition = (range: DateRange) =>
+  fetchAnalytics<ToolsAcquisition>('tools_acquisition', range);
+export const fetchToolsFunnel = (range: DateRange) =>
+  fetchAnalytics<ToolsFunnelStep[]>('tools_funnel', range);
+export const fetchToolsLinkSources = (range: DateRange) =>
+  fetchAnalytics<ToolsLinkSource[]>('tools_link_sources', range);
+
+export const TOOL_NAME: Record<string, string> = {
+  cash_flow:        'Cash Flow',
+  cap_rate:         'Cap Rate',
+  roi:              'ROI',
+  one_percent_rule: '1% Rule',
+  rent_vs_sell:     'Rent vs Sell',
+  rent_increase:    'Rent Increase',
+};
+
+export const TOOL_FUNNEL_LABELS: Record<string, string> = {
+  tool_viewed:                  'Tool Viewed',
+  tool_started:                 'Tool Started',
+  tool_calculated:              'Calculation Completed',
+  tool_market_rent_cta_clicked: 'Market-Rent CTA Clicked',
+  property_search_started:      'Property Search Started',
+  property_search_completed:    'Property Search Completed',
+  signup_completed:             'Signup Completed',
+  purchase_completed:           'Purchase Completed',
+};
+
 // ── Feature name map ──────────────────────────────────────────────────────────
 // Groups raw event names into human-readable feature rows for the UI.
 
