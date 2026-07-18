@@ -368,6 +368,38 @@ export const fetchToolsFunnel = (range: DateRange) =>
 export const fetchToolsLinkSources = (range: DateRange) =>
   fetchAnalytics<ToolsLinkSource[]>('tools_link_sources', range);
 
+// ── Report discovery funnel ───────────────────────────────────────────────────
+export interface ReportFunnelStep {
+  step: string;
+  total: number;
+  unique_visitors: number;
+}
+export interface ReportFunnelData {
+  funnel: ReportFunnelStep[];
+  assisted_signups: number;
+  assisted_purchases: number;
+  assisted_revenue: number;
+  by_entry: Array<{ entry_point: string; previews: number }>;
+}
+export const fetchReportFunnel = (range: DateRange) =>
+  fetchAnalytics<ReportFunnelData>('report_funnel', range);
+
+export const REPORT_FUNNEL_LABELS: Record<string, string> = {
+  property_search_completed: 'Property analyzed',
+  report_section_viewed: 'Report discovery',
+  report_preview_opened: 'Preview opened',
+  report_preview_cta_clicked: 'Create / Sign-in clicked',
+  report_signup_completed: 'Signed up from report',
+  report_generation_completed: 'Report created',
+};
+export const ENTRY_POINT_LABELS: Record<string, string> = {
+  primary_report_section: 'Primary section',
+  owner_analysis_prompt: 'Owner prompt',
+  buy_analysis_prompt: 'Buy prompt',
+  all_reports: 'All reports',
+  unknown: 'Unknown',
+};
+
 export const TOOL_NAME: Record<string, string> = {
   cash_flow:        'Cash Flow',
   cap_rate:         'Cap Rate',

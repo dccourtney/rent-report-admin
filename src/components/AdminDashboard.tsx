@@ -26,6 +26,7 @@ import {
   ToolsOverview, ToolByToolRow, ToolsTrendPoint, ToolsAcquisition,
   ToolsFunnelStep, ToolsLinkSource, TOOL_NAME, TOOL_FUNNEL_LABELS,
   fetchSentEmails, fetchEmailDetail, SentEmailRow, SentEmailDetail,
+  fetchReportFunnel, ReportFunnelData, REPORT_FUNNEL_LABELS, ENTRY_POINT_LABELS,
 } from '../lib/adminAnalyticsApi';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -495,7 +496,7 @@ function AnalyticsTab({
 const ACQUISITION_STEPS = ['page_view', 'property_search_completed', 'signup_started', 'signup_completed'];
 const MONETIZATION_STEPS = ['pricing_viewed', 'checkout_started', 'purchase_completed'];
 
-function FunnelsTab({ steps, modal, loading }: { steps: FunnelStep[] | null; modal: ModalFunnelData | null; loading: boolean }) {
+function FunnelsTab({ steps, modal, report, loading }: { steps: FunnelStep[] | null; modal: ModalFunnelData | null; report: ReportFunnelData | null; loading: boolean }) {
   if (loading) return <TabSpinner />;
   if (!steps)  return null;
 
@@ -609,6 +610,40 @@ function FunnelsTab({ steps, modal, loading }: { steps: FunnelStep[] | null; mod
           ))}
         </div>
       </Section>
+
+      {report && (
+        <Section title="Report discovery funnel — property analysis → report → paid">
+          <div className="p-5 space-y-5">
+            <div className="grid grid-cols-3 gap-4">
+              <StatCard label="Report-assisted signups" value={report.assisted_signups.toLocaleString()} icon={<Users className="w-4 h-4" />} />
+              <StatCard label="Report-assisted purchases" value={report.assisted_purchases.toLocaleString()} accent icon={<DollarSign className="w-4 h-4" />} />
+              <StatCard label="Report-assisted revenue" value={fmt$(Number(report.assisted_revenue) || 0)} accent icon={<DollarSign className="w-4 h-4" />} />
+            </div>
+            <div className="space-y-2">
+              {report.funnel.map((s) => (
+                <FunnelBar
+                  key={s.step}
+                  label={REPORT_FUNNEL_LABELS[s.step] ?? s.step}
+                  value={s.unique_visitors}
+                  of={report.funnel[0]?.unique_visitors || 1}
+                  color="bg-orange-400"
+                />
+              ))}
+            </div>
+            {report.by_entry.length > 0 && (
+              <div className="pt-4 border-t border-slate-100">
+                <p className="text-xs font-semibold text-slate-400 uppercase mb-2">Preview opens by entry point</p>
+                {report.by_entry.map((e) => (
+                  <div key={e.entry_point} className="flex justify-between text-xs text-slate-600 py-0.5">
+                    <span>{ENTRY_POINT_LABELS[e.entry_point] ?? e.entry_point}</span>
+                    <span className="tabular-nums">{e.previews.toLocaleString()}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </Section>
+      )}
     </div>
   );
 }
@@ -1484,6 +1519,7 @@ export default function AdminDashboard() {
   const [analyticsFeatures,  setFeatures]         = useState<GroupedFeature[] | null>(null);
   const [funnelSteps,        setFunnelSteps]      = useState<FunnelStep[] | null>(null);
   const [modalFunnel,        setModalFunnel]      = useState<ModalFunnelData | null>(null);
+  const [reportFunnel,       setReportFunnel]     = useState<ReportFunnelData | null>(null);
   const [journeyRows,        setJourneyRows]      = useState<JourneyRow[] | null>(null);
   const [errorRows,          setErrorRows]        = useState<ErrorRow[] | null>(null);
   const [dropoffs,           setDropoffs]         = useState<DropoffData | null>(null);
@@ -1570,12 +1606,14 @@ export default function AdminDashboard() {
         if (ret.status === 'ok')  setRetention(ret.data);
         if (feat.status === 'ok') setFeatures(groupFeatures(feat.data));
       } else if (tab === 'funnels') {
-        const [res, modalRes] = await Promise.all([
+        const [res, modalRes, reportRes] = await Promise.all([
           fetchAnalyticsFunnel(range),
           fetchModalFunnel(range),
+          fetchReportFunnel(range),
         ]);
         if (res.status === 'ok')      setFunnelSteps(res.data);
         if (modalRes.status === 'ok') setModalFunnel(modalRes.data);
+        if (reportRes.status === 'ok') setReportFunnel(reportRes.data);
       } else if (tab === 'journeys') {
         const res = await fetchAnalyticsJourneys(range);
         if (res.status === 'ok') setJourneyRows(res.data);
@@ -1625,6 +1663,7 @@ export default function AdminDashboard() {
     setFeatures(null);
     setFunnelSteps(null);
     setModalFunnel(null);
+    setReportFunnel(null);
     setJourneyRows(null);
     setErrorRows(null);
     setDropoffs(null);
@@ -1643,6 +1682,7 @@ export default function AdminDashboard() {
     setFeatures(null);
     setFunnelSteps(null);
     setModalFunnel(null);
+    setReportFunnel(null);
     setJourneyRows(null);
     setErrorRows(null);
     setDropoffs(null);
@@ -1995,7 +2035,7 @@ export default function AdminDashboard() {
 
         {/* ── Funnels tab ────────────────────────────────────────────────── */}
         {activeTab === 'funnels' && (
-          <FunnelsTab steps={funnelSteps} modal={modalFunnel} loading={tabLoading} />
+          <FunnelsTab steps={funnelSteps} modal={modalFunnel} report={reportFunnel} loading={tabLoading} />
         )}
 
         {/* ── Journeys tab ───────────────────────────────────────────────── */}
