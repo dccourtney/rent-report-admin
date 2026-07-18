@@ -1317,6 +1317,10 @@ function ToolsTab({
 
 const EMAILS_PAGE = 50;
 
+// Readable fallback label for rows sent before subjects were stored.
+const humanizeKey = (key: string) =>
+  key ? key.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase()) : '(no subject)';
+
 function emailStatusPills(e: SentEmailRow) {
   const pills: Array<{ label: string; cls: string }> = [];
   if (e.bounced_at) pills.push({ label: 'Bounced', cls: 'bg-red-100 text-red-700' });
@@ -1347,7 +1351,7 @@ function EmailDetailModal({ id, onClose }: { id: string; onClose: () => void }) 
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="px-5 py-4 border-b border-slate-100 flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <p className="font-semibold text-slate-900 truncate">{detail?.subject ?? '(no subject)'}</p>
+            <p className="font-semibold text-slate-900 truncate">{detail?.subject || (detail ? humanizeKey(detail.email_key) : '…')}</p>
             <p className="text-xs text-slate-500 mt-0.5 truncate">
               To {detail?.to_email ?? '—'} · {detail?.email_key} · {fmtTime(detail?.sent_at ?? null)}
             </p>
@@ -1407,8 +1411,8 @@ function EmailsTab() {
                 : rows.map((e) => (
                     <tr key={e.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => setOpenId(e.id)}>
                       <Td mono>{e.to_email ?? '—'}</Td>
-                      <Td>{e.subject ?? <span className="text-slate-400">(no subject)</span>}</Td>
-                      <Td muted>{e.email_key}</Td>
+                      <Td>{e.subject || <span className="text-slate-500">{humanizeKey(e.email_key)}</span>}</Td>
+                      <Td muted>{e.campaign ?? e.email_key}</Td>
                       <Td muted>{fmtRelative(e.sent_at)}</Td>
                       <Td>
                         <div className="flex flex-wrap gap-1">
