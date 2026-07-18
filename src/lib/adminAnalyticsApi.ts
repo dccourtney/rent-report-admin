@@ -200,6 +200,32 @@ export const fetchLifecycleOverview = (range: DateRange) =>
 export const fetchLifecycleUserHistory = (userId: string) =>
   fetchLifecycleFn<{ history: LifecycleHistoryRow[] }>('user_history', 'all', { user_id: userId });
 
+// ── Sent-emails inbox ─────────────────────────────────────────────────────────
+export interface SentEmailRow {
+  id: string;
+  to_email: string | null;
+  subject: string | null;
+  email_key: string;
+  campaign: string | null;
+  status: string;
+  sent_at: string | null;
+  delivered_at: string | null;
+  opened_at: string | null;
+  clicked_at: string | null;
+  bounced_at: string | null;
+  unsubscribed_at: string | null;
+}
+export interface SentEmailDetail extends SentEmailRow {
+  goal: string | null;
+  html: string | null;
+}
+export const fetchSentEmails = (limit: number, offset: number) =>
+  fetchLifecycleFn<{ emails: SentEmailRow[]; total: number; limit: number; offset: number }>(
+    'emails_list', 'all', { limit, offset },
+  );
+export const fetchEmailDetail = (id: string) =>
+  fetchLifecycleFn<{ email: SentEmailDetail | null }>('email_detail', 'all', { id });
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export const fetchAnalyticsOverview = (range: DateRange) =>

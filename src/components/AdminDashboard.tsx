@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   RefreshCw, TrendingUp, Users, DollarSign, ShieldAlert, Search,
   AlertTriangle, BarChart2, GitBranch, Map, AlertCircle, Zap,
-  ChevronDown, ChevronRight, Mail, Send, Wrench,
+  ChevronDown, ChevronRight, Mail, Send, Wrench, Inbox, X,
 } from 'lucide-react';
 import { useAuthStore } from '../stores/authStore';
 import { useProfileStore } from '../stores/profileStore';
@@ -25,6 +25,7 @@ import {
   fetchToolsAcquisition, fetchToolsFunnel, fetchToolsLinkSources,
   ToolsOverview, ToolByToolRow, ToolsTrendPoint, ToolsAcquisition,
   ToolsFunnelStep, ToolsLinkSource, TOOL_NAME, TOOL_FUNNEL_LABELS,
+  fetchSentEmails, fetchEmailDetail, SentEmailRow, SentEmailDetail,
 } from '../lib/adminAnalyticsApi';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -200,7 +201,7 @@ function DateRangeSelector({ value, onChange }: { value: DateRange; onChange: (r
 
 // ── Tab bar ───────────────────────────────────────────────────────────────────
 
-type AdminTab = 'overview' | 'analytics' | 'funnels' | 'journeys' | 'errors' | 'users' | 'lifecycle' | 'tools';
+type AdminTab = 'overview' | 'analytics' | 'funnels' | 'journeys' | 'errors' | 'users' | 'lifecycle' | 'tools' | 'emails';
 
 const TABS: Array<{ id: AdminTab; label: string; icon: React.ReactNode }> = [
   { id: 'overview',  label: 'Overview',   icon: <TrendingUp className="w-3.5 h-3.5" /> },
@@ -211,6 +212,7 @@ const TABS: Array<{ id: AdminTab; label: string; icon: React.ReactNode }> = [
   { id: 'errors',    label: 'Errors',     icon: <AlertCircle className="w-3.5 h-3.5" /> },
   { id: 'users',     label: 'Users',      icon: <Zap        className="w-3.5 h-3.5" /> },
   { id: 'tools',     label: 'Tools & SEO', icon: <Wrench     className="w-3.5 h-3.5" /> },
+  { id: 'emails',    label: 'Emails',     icon: <Inbox      className="w-3.5 h-3.5" /> },
 ];
 
 // ── Lifecycle tab ─────────────────────────────────────────────────────────────
@@ -1311,6 +1313,138 @@ function ToolsTab({
   );
 }
 
+// ── Emails inbox tab ──────────────────────────────────────────────────────────
+
+const EMAILS_PAGE = 50;
+
+function emailStatusPills(e: SentEmailRow) {
+  const pills: Array<{ label: string; cls: string }> = [];
+  if (e.bounced_at) pills.push({ label: 'Bounced', cls: 'bg-red-100 text-red-700' });
+  if (e.unsubscribed_at) pills.push({ label: 'Unsub', cls: 'bg-slate-200 text-slate-600' });
+  if (e.clicked_at) pills.push({ label: 'Clicked', cls: 'bg-orange-100 text-orange-700' });
+  if (e.opened_at) pills.push({ label: 'Opened', cls: 'bg-teal-100 text-teal-700' });
+  if (!e.opened_at && !e.clicked_at && e.delivered_at) pills.push({ label: 'Delivered', cls: 'bg-emerald-100 text-emerald-700' });
+  if (pills.length === 0) pills.push({ label: e.status, cls: 'bg-slate-100 text-slate-500' });
+  return pills;
+}
+
+function EmailDetailModal({ id, onClose }: { id: string; onClose: () => void }) {
+  const [detail, setDetail] = useState<SentEmailDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetchEmailDetail(id).then((r) => {
+      if (cancelled) return;
+      if (r.status === 'ok') setDetail(r.data.email);
+      setLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [id]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="px-5 py-4 border-b border-slate-100 flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <p className="font-semibold text-slate-900 truncate">{detail?.subject ?? '(no subject)'}</p>
+            <p className="text-xs text-slate-500 mt-0.5 truncate">
+              To {detail?.to_email ?? '—'} · {detail?.email_key} · {fmtTime(detail?.sent_at ?? null)}
+            </p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-700 shrink-0"><X className="w-5 h-5" /></button>
+        </div>
+        <div className="flex-1 overflow-hidden p-4 bg-slate-50">
+          {loading ? (
+            <div className="h-full flex items-center justify-center"><RefreshCw className="w-5 h-5 animate-spin text-slate-400" /></div>
+          ) : detail?.html ? (
+            <iframe title="email" sandbox="" srcDoc={detail.html} className="w-full h-[65vh] bg-white rounded-lg border border-slate-200" />
+          ) : (
+            <div className="h-full flex items-center justify-center text-sm text-slate-400 text-center px-6">
+              No stored content for this email. Only emails sent after the inbox was enabled include their full content.
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EmailsTab() {
+  const [rows, setRows] = useState<SentEmailRow[] | null>(null);
+  const [total, setTotal] = useState(0);
+  const [offset, setOffset] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [openId, setOpenId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetchSentEmails(EMAILS_PAGE, offset).then((r) => {
+      if (cancelled) return;
+      if (r.status === 'ok') { setRows(r.data.emails); setTotal(r.data.total); }
+      setLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [offset]);
+
+  if (loading && rows === null) return <TabSpinner />;
+
+  const from = total === 0 ? 0 : offset + 1;
+  const to = Math.min(offset + EMAILS_PAGE, total);
+
+  return (
+    <div className="space-y-4">
+      <Section title={`Sent emails${total ? ` — ${total.toLocaleString()}` : ''}`}>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr><Th>To</Th><Th>Subject</Th><Th>Type</Th><Th>Sent</Th><Th>Status</Th></tr>
+            </thead>
+            <tbody>
+              {!rows || rows.length === 0
+                ? <EmptyRow cols={5} message="No sent emails yet" />
+                : rows.map((e) => (
+                    <tr key={e.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => setOpenId(e.id)}>
+                      <Td mono>{e.to_email ?? '—'}</Td>
+                      <Td>{e.subject ?? <span className="text-slate-400">(no subject)</span>}</Td>
+                      <Td muted>{e.email_key}</Td>
+                      <Td muted>{fmtRelative(e.sent_at)}</Td>
+                      <Td>
+                        <div className="flex flex-wrap gap-1">
+                          {emailStatusPills(e).map((p) => (
+                            <span key={p.label} className={`px-1.5 py-0.5 rounded text-[11px] font-semibold ${p.cls}`}>{p.label}</span>
+                          ))}
+                        </div>
+                      </Td>
+                    </tr>
+                  ))}
+            </tbody>
+          </table>
+        </div>
+      </Section>
+
+      <div className="flex items-center justify-between text-sm text-slate-500">
+        <span>{total > 0 ? `${from.toLocaleString()}–${to.toLocaleString()} of ${total.toLocaleString()}` : ''}</span>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setOffset(Math.max(0, offset - EMAILS_PAGE))}
+            disabled={offset === 0 || loading}
+            className="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 disabled:opacity-40 hover:border-slate-300"
+          >Prev</button>
+          <button
+            onClick={() => setOffset(offset + EMAILS_PAGE)}
+            disabled={to >= total || loading}
+            className="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 disabled:opacity-40 hover:border-slate-300"
+          >Next</button>
+        </div>
+      </div>
+
+      {openId && <EmailDetailModal id={openId} onClose={() => setOpenId(null)} />}
+    </div>
+  );
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 export default function AdminDashboard() {
@@ -1415,7 +1549,7 @@ export default function AdminDashboard() {
 
   // ── Analytics tab loader ──────────────────────────────────────────────────
   const loadAnalyticsTab = async (tab: AdminTab, range: DateRange) => {
-    if (tab === 'overview') return;
+    if (tab === 'overview' || tab === 'emails') return; // emails self-manages its own paging
     const key = `${tab}:${range}`;
     if (loadedRef.current.has(key)) return;
     loadedRef.current.add(key);
@@ -1894,6 +2028,8 @@ export default function AdminDashboard() {
             loading={tabLoading}
           />
         )}
+
+        {activeTab === 'emails' && <EmailsTab />}
 
       </div>
     </div>
