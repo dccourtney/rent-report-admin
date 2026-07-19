@@ -134,9 +134,12 @@ export async function fetchAdminMetrics(): Promise<AdminMetricsResult> {
     // tz natively; we send the boundaries as UTC ISO).
     const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
     const monthStart = new Date(midnight.getFullYear(), midnight.getMonth(), 1);
+    let tz = 'UTC';
+    try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch { /* keep UTC */ }
     const qs = new URLSearchParams({
       todayStart: midnight.toISOString(),
       monthStart: monthStart.toISOString(),
+      tz,
     });
 
     const res = await fetch(
